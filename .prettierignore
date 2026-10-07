@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+**/drizzle/meta/
+**/.next/
+**/dist/
+**/coverage/
+**/storybook-static/
+
+# Hand-written notes – keep the author's formatting
+CLAUDE.md
+docs/learning/

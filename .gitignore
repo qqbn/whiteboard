@@ -1,0 +1,33 @@
+# deps
+node_modules/
+
+# builds
+dist/
+.next/
+out/
+storybook-static/
+*.tsbuildinfo
+
+# turbo
+.turbo/
+
+# env
+.env
+.env.*
+!.env.example
+
+# tests
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# misc
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea/
+next-env.d.ts
+
+*storybook.log

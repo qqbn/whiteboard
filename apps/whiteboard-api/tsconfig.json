@@ -1,0 +1,10 @@
+{
+  "extends": "@whiteboard/config/tsconfig/nestjs.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist",
+    "types": ["node"]
+  },
+  "include": ["src", "*.ts"],
+  "exclude": ["node_modules", "dist", "drizzle"]
+}
