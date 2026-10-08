@@ -1,6 +1,6 @@
-import { Toolbar } from '@whiteboard/ui';
 import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
+import { BoardToolbar } from '@/components/board-toolbar';
 import { BoardCanvas } from '@/components/board-canvas';
 import { parseBoardIdParam } from '@/lib/board-id';
 
@@ -11,7 +11,7 @@ export default function BoardPage({ params }: PageProps<'/board/[id]'>) {
         <Board params={params} />
       </Suspense>
       <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
-        <Toolbar aria-label="Board tools" className="pointer-events-auto" />
+        <BoardToolbar />
       </div>
     </main>
   );

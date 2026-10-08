@@ -15,6 +15,7 @@
     "extends": "../../package.json"
   },
   "dependencies": {
+    "lucide-react": "1.52.0",
     "radix-ui": "1.7.0"
   },
   "devDependencies": {

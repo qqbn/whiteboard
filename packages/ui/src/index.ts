@@ -1,2 +1,8 @@
-export { Toolbar, ToolbarButton, ToolbarSeparator } from './toolbar/toolbar';
+export {
+  Toolbar,
+  ToolbarButton,
+  ToolbarSeparator,
+  ToolbarToggleGroup,
+  ToolbarToggleItem,
+} from './toolbar/toolbar';
 export { cn } from './lib/cn';

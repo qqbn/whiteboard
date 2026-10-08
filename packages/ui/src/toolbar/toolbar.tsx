@@ -42,3 +42,25 @@ export function ToolbarSeparator({
     />
   );
 }
+
+export function ToolbarToggleGroup(props: ComponentProps<typeof ToolbarPrimitive.ToggleGroup>) {
+  return <ToolbarPrimitive.ToggleGroup {...props} />;
+}
+
+export function ToolbarToggleItem({
+  className,
+  ...props
+}: ComponentProps<typeof ToolbarPrimitive.ToggleItem>) {
+  return (
+    <ToolbarPrimitive.ToggleItem
+      className={cn(
+        'inline-flex h-9 min-w-9 items-center justify-center rounded-md px-2 text-sm text-neutral-700',
+        'hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none',
+        'data-[state=on]:bg-blue-100 data-[state=on]:text-blue-700',
+        'disabled:pointer-events-none disabled:opacity-40',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
