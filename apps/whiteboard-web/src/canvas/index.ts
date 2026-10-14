@@ -2,3 +2,4 @@
 export type { Camera, Point } from './camera';
 export type { BoardModel, Shape, ShapeId, ShapeType } from './model';
 export type { RenderState } from './render-loop';
+export type { BoardStore, Unsubscribe } from './board-store';
