@@ -1,6 +1,8 @@
 'use client';
-import { startRenderLoop } from '@/canvas/render-loop';
-import { type RenderState } from '@/canvas/render-loop';
+import { createBoardStore } from '@/canvas/board-store';
+import type { Shape } from '@/canvas/model';
+import { startRenderLoop, type RenderState } from '@/canvas/render-loop';
+import { useCameraStore } from '@/stores/camera-store';
 import { useEffect, useRef } from 'react';
 
 /**
@@ -8,20 +10,13 @@ import { useEffect, useRef } from 'react';
  * Deliberately draws nothing – rendering, camera and the rAF loop live in `src/canvas/` (learning zone).
  */
 
-const getState = (): RenderState => ({
-  model: {
-    shapes: {
-      a: { id: 'a', type: 'rectangle', x: 30, y: 50, w: 50, h: 30, color: 'red' },
-      b: { id: 'b', type: 'rectangle', x: 50, y: 60, w: 100, h: 120, color: 'blue' },
-    },
-    order: ['a', 'b'],
-  },
-  camera: {
-    x: 0,
-    y: 0,
-    zoom: 2,
-  },
-});
+const boardStore = createBoardStore();
+
+// Temporary sample shapes to check the store → render loop → camera chain. Remove once tools exist.
+const SAMPLE_SHAPES: Shape[] = [
+  { id: 'sample-rect', type: 'rectangle', x: 100, y: 100, w: 200, h: 120, color: '#4f46e5' },
+  { id: 'sample-ellipse', type: 'ellipse', x: 250, y: 160, w: 180, h: 120, color: '#f59e0b' },
+];
 
 export function BoardCanvas({ boardId }: { boardId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,6 +24,16 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // The store lives at module level, so a Strict Mode double-run (or remount) must not `add` twice.
+    for (const shape of SAMPLE_SHAPES) {
+      if (!boardStore.get(shape.id)) boardStore.add(shape);
+    }
+
+    const getState = (): RenderState => ({
+      model: boardStore.getModel(),
+      camera: useCameraStore.getState().camera,
+    });
 
     const stopRenderLoop = startRenderLoop(canvas, getState);
 
