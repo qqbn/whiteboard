@@ -7,6 +7,7 @@ dist/
 out/
 storybook-static/
 *.tsbuildinfo
+.claude/
 
 # turbo
 .turbo/
