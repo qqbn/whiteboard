@@ -1,10 +1,12 @@
 'use client';
 import { createBoardStore } from '@/canvas/board-store';
 import { screenToWorld, type Point } from '@/canvas/camera';
+import { hitTest } from '@/canvas/hit-test';
 import type { BoardModel, Shape } from '@/canvas/model';
 import { startRenderLoop, type RenderState } from '@/canvas/render-loop';
 import { boundsFromDrag, isTinyDrag } from '@/lib/drag-rect';
 import { useCameraStore } from '@/stores/camera-store';
+import { useSelectionStore } from '@/stores/selection-store';
 import { useToolStore, type ToolType } from '@/stores/tool-store';
 import { useEffect, useRef } from 'react';
 
@@ -96,6 +98,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
             ? withPreviewShape(model, shapeFromDrag(DRAFT_ID, interaction))
             : model,
         camera: useCameraStore.getState().camera,
+        selectedId: useSelectionStore.getState().selectedId,
       };
     };
 
@@ -111,7 +114,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     };
 
     // Starts a pan (middle button, or left button while holding Space) or a shape drag (left button
-    // with the rectangle/ellipse tool). Anything else is ignored for now (selection comes later).
+    // with the rectangle/ellipse tool), or selects a shape on click with the select tool.
     const onPointerDown = (event: PointerEvent) => {
       if (interaction) return; // one gesture at a time (e.g. ignore a second finger/button)
 
@@ -124,6 +127,11 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
       } else if (event.button === 0 && isDrawableTool(tool)) {
         const start = toWorldPoint(event);
         interaction = { kind: 'draw', pointerId: event.pointerId, tool, start, current: start };
+      } else if (event.button === 0 && tool === 'select') {
+        // A plain click with the select tool: select the topmost shape under the cursor, or clear
+        // the selection when the click lands on empty space. No drag gesture starts here yet.
+        useSelectionStore.getState().select(hitTest(boardStore.getModel(), toWorldPoint(event)));
+        return;
       } else {
         return;
       }
@@ -170,7 +178,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
       updateCursor();
     };
 
-    // Space turns the left button into a pan handle; Escape cancels a shape drag in progress.
+    // Space turns the left button into a pan handle; Escape cancels a shape drag in progress (or clears the selection when idle).
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable]'))
@@ -180,8 +188,9 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
         event.preventDefault(); // otherwise Space scrolls the page or "clicks" a focused toolbar button
         spaceHeld = true;
         updateCursor();
-      } else if (event.key === 'Escape' && interaction?.kind === 'draw') {
-        cancelInteraction();
+      } else if (event.key === 'Escape') {
+        if (interaction?.kind === 'draw') cancelInteraction();
+        else useSelectionStore.getState().select(null);
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {

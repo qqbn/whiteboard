@@ -1,11 +1,14 @@
 import type { Camera } from './camera';
+import { drawSelection } from './draw-selection';
 import { drawShape } from './draw-shape';
-import type { BoardModel } from './model';
+import type { BoardModel, ShapeId } from './model';
 
 export type RenderState = {
   model: BoardModel;
   camera: Camera;
-  // TODO(ja): zaznaczenie, kształt w trakcie rysowania, aktywne narzędzie
+  /** Id of the shape to outline on top of everything else, or `null` for no selection. */
+  selectedId: ShapeId | null;
+  // TODO(ja): kształt w trakcie rysowania, aktywne narzędzie
 };
 
 /** Startuje pętlę i zwraca funkcję czyszczącą (cancelAnimationFrame). */
@@ -32,6 +35,11 @@ export function startRenderLoop(
       const shape = state.model.shapes[shapeId];
       if (shape) drawShape(ctx, shape);
     }
+
+    // The outline goes last so it is never hidden by shapes drawn above the selected one.
+    // A stale id (the shape was removed) simply finds nothing and draws nothing.
+    const selected = state.selectedId ? state.model.shapes[state.selectedId] : undefined;
+    if (selected) drawSelection(ctx, selected, state.camera.zoom);
 
     id = requestAnimationFrame(tick);
   };
