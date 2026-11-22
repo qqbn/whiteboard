@@ -27,6 +27,10 @@ export type Arrow = Item & {
   endY: number;
 };
 
+/**
+ * `x, y` – lewy górny róg pola tekstu. `w, h` to rozmiar POCHODNY od `content` i `fontSize`
+ * (zob. `measureWriting`): kto zmienia treść albo rozmiar czcionki, musi je przeliczyć w tym samym patchu.
+ */
 export type Writing = Item & {
   content: string;
   fontSize: number;

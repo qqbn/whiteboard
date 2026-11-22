@@ -13,7 +13,8 @@ import type { Arrow, BoardModel, Ellipse, Rectangle, Shape, ShapeId } from './mo
  *   is in WORLD units and exists because a "close enough" distance is defined on screen (e.g. 6 px), which
  *   is a different distance in the world at every zoom level: callers pass `screenPixels / camera.zoom`.
  *   It never shrinks below half the drawn line width, so you can always hit the visible line itself.
- * - Writing is not hit-testable yet (it is not drawn yet), so it never matches.
+ * - A writing is hit anywhere inside its box (`x, y, w, h`), not only on the glyphs: thin letters would be
+ *   very hard to click. Its `w`/`h` are kept in the model, see `measureWriting`.
  *
  * Pure function: reads the model, changes nothing, so it is easy to unit test.
  */
@@ -36,9 +37,8 @@ function containsPoint(shape: Shape, point: Point, tolerance: number): boolean {
       return ellipseContains(shape, point);
     case 'arrow':
       return arrowContains(shape, point, tolerance);
-    // TODO(ja): 'writing'.
     case 'writing':
-      return false;
+      return rectangleContains(shape, point);
   }
 }
 
@@ -73,7 +73,7 @@ export function distanceToSegment(point: Point, a: Point, b: Point): number {
 }
 
 /** Axis-aligned box test: the point must lie within `[x, x + w] × [y, y + h]` (edges count as inside). */
-function rectangleContains(shape: Rectangle, point: Point): boolean {
+function rectangleContains(shape: Pick<Rectangle, 'x' | 'y' | 'w' | 'h'>, point: Point): boolean {
   return (
     point.x >= shape.x &&
     point.x <= shape.x + shape.w &&

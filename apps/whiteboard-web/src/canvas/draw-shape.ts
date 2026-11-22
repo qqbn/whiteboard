@@ -1,4 +1,5 @@
-import type { Arrow, Shape } from './model';
+import type { Arrow, Shape, Writing } from './model';
+import { fontFor, lineHeightOf, splitLines } from './text';
 
 export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
   ctx.save();
@@ -25,7 +26,9 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
     case 'arrow':
       drawArrow(ctx, shape);
       break;
-    // TODO(ja): 'writing'
+    case 'writing':
+      drawWriting(ctx, shape);
+      break;
     default:
       break;
   }
@@ -70,4 +73,22 @@ function drawArrow(ctx: CanvasRenderingContext2D, arrow: Arrow): void {
     );
   }
   ctx.stroke();
+}
+
+/**
+ * Draws a text line by line. `(x, y)` is the top-left corner of the text box and every line gets a
+ * slot of `lineHeightOf(fontSize)`. The baseline is `'middle'` and the y is the CENTRE of the slot:
+ * that is where CSS puts the glyphs inside a line box (half of the leading above and below), so the
+ * canvas text lines up with the `<textarea>` the user typed it in. It sets its own `fillStyle` from
+ * `shape.color`, so it does not depend on whatever `drawShape` set before the `switch`.
+ */
+function drawWriting(ctx: CanvasRenderingContext2D, writing: Writing): void {
+  const lineHeight = lineHeightOf(writing.fontSize);
+  ctx.fillStyle = writing.color;
+  ctx.font = fontFor(writing.fontSize);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  splitLines(writing.content).forEach((line, index) => {
+    ctx.fillText(line, writing.x, writing.y + (index + 0.5) * lineHeight);
+  });
 }

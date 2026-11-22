@@ -113,21 +113,6 @@ describe('hitTest', () => {
       expect(hitTest(modelOf(back), { x: 50, y: 70 })).toBeNull();
     });
   });
-
-  it('never matches writing yet', () => {
-    const writing: Shape = {
-      id: 'text',
-      type: 'writing',
-      x: 0,
-      y: 0,
-      w: 100,
-      h: 20,
-      content: 'hi',
-      fontSize: 16,
-      color: '#000',
-    };
-    expect(hitTest(modelOf(writing), { x: 50, y: 10 })).toBeNull();
-  });
 });
 
 describe('distanceToSegment', () => {
@@ -154,5 +139,36 @@ describe('distanceToSegment', () => {
   it('works for diagonal segments', () => {
     // Segment (0,0) → (10,10); the point (0,10) is 10 / sqrt(2) away from it (perpendicular foot at (5,5)).
     expect(distanceToSegment({ x: 0, y: 10 }, a, { x: 10, y: 10 })).toBeCloseTo(10 * Math.SQRT1_2);
+  });
+});
+
+describe('writing', () => {
+  const writing: Shape = {
+    id: 'text',
+    type: 'writing',
+    x: 10,
+    y: 20,
+    w: 80,
+    h: 30,
+    content: 'hi',
+    fontSize: 24,
+    color: '#000',
+  };
+
+  it('hits anywhere inside its box, edges included', () => {
+    const model = modelOf(writing);
+    expect(hitTest(model, { x: 50, y: 35 })).toBe('text');
+    expect(hitTest(model, { x: 10, y: 20 })).toBe('text');
+    expect(hitTest(model, { x: 90, y: 50 })).toBe('text');
+  });
+
+  it('misses outside its box', () => {
+    const model = modelOf(writing);
+    expect(hitTest(model, { x: 9.9, y: 35 })).toBeNull();
+    expect(hitTest(model, { x: 50, y: 50.1 })).toBeNull();
+  });
+
+  it('is on top when drawn after an overlapping rectangle', () => {
+    expect(hitTest(modelOf(rect, writing), { x: 20, y: 25 })).toBe('text');
   });
 });

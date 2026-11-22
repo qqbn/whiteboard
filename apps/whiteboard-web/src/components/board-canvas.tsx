@@ -2,12 +2,15 @@
 import { createBoardStore } from '@/canvas/board-store';
 import { screenToWorld, type Point } from '@/canvas/camera';
 import { hitTest } from '@/canvas/hit-test';
-import type { BoardModel, Shape } from '@/canvas/model';
+import type { BoardModel, Shape, ShapeId, Writing } from '@/canvas/model';
 import { startRenderLoop, type RenderState } from '@/canvas/render-loop';
+import { DEFAULT_FONT_SIZE, lineHeightOf } from '@/canvas/text';
+import { TextEditor } from '@/components/text-editor';
 import { boundsFromDrag, isTinyDrag } from '@/lib/drag-rect';
 import { translateShape } from '@/lib/move-shape';
 import { useCameraStore } from '@/stores/camera-store';
 import { useSelectionStore } from '@/stores/selection-store';
+import { useTextEditStore } from '@/stores/text-edit-store';
 import { useToolStore, type ToolType } from '@/stores/tool-store';
 import { useEffect, useRef } from 'react';
 
@@ -92,6 +95,25 @@ function withPreviewShape(model: BoardModel, shape: Shape): BoardModel {
   };
 }
 
+/** Returns a copy of the model without `id` (used to hide a text while its `<textarea>` is open). */
+function withoutShape(model: BoardModel, id: ShapeId): BoardModel {
+  if (!Object.hasOwn(model.shapes, id)) return model;
+  const { [id]: _hidden, ...shapes } = model.shapes;
+  return { shapes, order: model.order.filter((shapeId) => shapeId !== id) };
+}
+
+/** Starts the text editor on an existing text; the editor commits the result to the store itself. */
+function beginEditingWriting(writing: Writing): void {
+  useTextEditStore.getState().begin({
+    id: writing.id,
+    x: writing.x,
+    y: writing.y,
+    content: writing.content,
+    fontSize: writing.fontSize,
+    color: writing.color,
+  });
+}
+
 /** Returns a copy of the model where one existing shape is swapped for `shape` (draw order unchanged). */
 function withReplacedShape(model: BoardModel, shape: Shape): BoardModel {
   return { shapes: { ...model.shapes, [shape.id]: shape }, order: model.order };
@@ -106,6 +128,9 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
 
     let interaction: Interaction | null = null;
     let spaceHeld = false;
+    // A pan that ends over the canvas still produces a `click`; with the text tool that must not
+    // open a text editor, so the pan sets this flag and the next `click` swallows it.
+    let suppressClick = false;
 
     // Pointer position relative to the canvas' top-left corner, in CSS pixels.
     // This is the coordinate space the camera works in (the render loop applies DPR separately).
@@ -124,6 +149,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
       else if (spaceHeld) canvas.style.cursor = 'grab';
       else if (isDrawableTool(useToolStore.getState().activeTool))
         canvas.style.cursor = 'crosshair';
+      else if (useToolStore.getState().activeTool === 'text') canvas.style.cursor = 'text';
       else canvas.style.cursor = 'default';
     };
 
@@ -132,7 +158,10 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     // a cancelled gesture leaves no trace (and a single `add`/`update` on release means one future
     // undo step). The selection outline follows a moved shape because it is drawn from this model.
     const getPreviewModel = (): BoardModel => {
-      const model = boardStore.getModel();
+      const editingId = useTextEditStore.getState().edit?.id;
+      // The text being edited is hidden: the `<textarea>` shows it, drawing it too would double it.
+      const model =
+        editingId == null ? boardStore.getModel() : withoutShape(boardStore.getModel(), editingId);
       if (interaction?.kind === 'draw') {
         return withPreviewShape(model, shapeFromDrag(DRAFT_ID, interaction));
       }
@@ -166,6 +195,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     // with the rectangle/ellipse tool), or, with the select tool, selects the shape under the cursor
     // and arms a move gesture on it.
     const onPointerDown = (event: PointerEvent) => {
+      suppressClick = false; // a new gesture; drop a flag left over from a gesture that never clicked
       if (interaction) return; // one gesture at a time (e.g. ignore a second finger/button)
 
       const wantsPan = event.button === 1 || (event.button === 0 && spaceHeld);
@@ -244,7 +274,9 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     const onPointerUp = (event: PointerEvent) => {
       if (!interaction || event.pointerId !== interaction.pointerId) return;
 
-      if (interaction.kind === 'draw') {
+      if (interaction.kind === 'pan') {
+        suppressClick = true;
+      } else if (interaction.kind === 'draw') {
         interaction.current = toWorldPoint(event);
         const shape = shapeFromDrag(crypto.randomUUID(), interaction);
         const size = boundsFromDrag(interaction.start, interaction.current);
@@ -257,6 +289,43 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
 
       interaction = null;
       updateCursor();
+    };
+
+    // Text tool: a click on empty canvas opens an editor for a new text there (the click point becomes
+    // the middle of the first line, so the caret appears under the cursor); a click on an existing
+    // text edits that one instead of stacking a second text on top. The editor is opened on `click`
+    // (after the mouse button is released), not on `pointerdown`: the browser moves focus on mouse
+    // down, which would immediately blur the freshly focused `<textarea>` and close it again.
+    const onClick = (event: MouseEvent) => {
+      if (suppressClick) {
+        suppressClick = false;
+        return;
+      }
+      if (event.button !== 0 || spaceHeld || useToolStore.getState().activeTool !== 'text') return;
+
+      const point = toWorldPoint(event);
+      const hitId = hitTest(boardStore.getModel(), point);
+      const hit = hitId === null ? undefined : boardStore.get(hitId);
+      if (hit?.type === 'writing') {
+        beginEditingWriting(hit);
+        return;
+      }
+      useTextEditStore.getState().begin({
+        id: null,
+        x: point.x,
+        y: point.y - lineHeightOf(DEFAULT_FONT_SIZE) / 2,
+        content: '',
+        fontSize: DEFAULT_FONT_SIZE,
+        color: SHAPE_COLOR,
+      });
+    };
+
+    // Double click on a text with the select tool edits it (the same gesture as in most editors).
+    const onDoubleClick = (event: MouseEvent) => {
+      if (useToolStore.getState().activeTool !== 'select') return;
+      const hitId = hitTest(boardStore.getModel(), toWorldPoint(event));
+      const hit = hitId === null ? undefined : boardStore.get(hitId);
+      if (hit?.type === 'writing') beginEditingWriting(hit);
     };
 
     // Aborts the gesture without committing anything (system interruption, lost capture, Escape).
@@ -291,6 +360,8 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', cancelInteraction);
+    canvas.addEventListener('click', onClick);
+    canvas.addEventListener('dblclick', onDoubleClick);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     // Keeps the cursor in sync when the user picks another tool in the toolbar.
@@ -334,6 +405,8 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointercancel', cancelInteraction);
+      canvas.removeEventListener('click', onClick);
+      canvas.removeEventListener('dblclick', onDoubleClick);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       unsubscribeTool();
@@ -342,12 +415,16 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     };
   }, []);
 
+  // The wrapper is the positioning context of the text editor, whose coordinates are relative to the canvas.
   return (
-    <canvas
-      ref={canvasRef}
-      data-board-id={boardId}
-      className="block h-full w-full touch-none"
-      aria-label="Whiteboard canvas"
-    />
+    <div className="relative h-full w-full">
+      <canvas
+        ref={canvasRef}
+        data-board-id={boardId}
+        className="block h-full w-full touch-none"
+        aria-label="Whiteboard canvas"
+      />
+      <TextEditor store={boardStore} />
+    </div>
   );
 }
