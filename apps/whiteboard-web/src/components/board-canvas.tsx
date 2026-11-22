@@ -24,6 +24,8 @@ const DRAFT_ID = '__draft__';
 const SHAPE_COLOR = '#4f46e5';
 /** A drag smaller than this (in world units, both sides) is treated as a click and creates nothing. */
 const MIN_SHAPE_SIZE = 4;
+/** How close (in screen pixels) a click must be to a thin shape such as an arrow to select it. */
+const HIT_TOLERANCE_PX = 6;
 /** Pointer travel (canvas pixels) before a click on a shape turns into a move, so clicks don't nudge shapes. */
 const MOVE_DEAD_ZONE_PX = 3;
 /** Wheel sensitivity: zoom factor = exp(-deltaY * ZOOM_SENSITIVITY), so scrolling back undoes it exactly. */
@@ -31,7 +33,7 @@ const ZOOM_SENSITIVITY = 0.0015;
 /** Firefox reports wheel deltas in lines instead of pixels; this converts lines to pixels. */
 const LINE_HEIGHT_PX = 16;
 
-type DrawableTool = Extract<ToolType, 'rectangle' | 'ellipse'>;
+type DrawableTool = Extract<ToolType, 'rectangle' | 'ellipse' | 'arrow'>;
 
 /**
  * What the pointer is currently doing. Lives in a closure variable (not React state) because it
@@ -57,11 +59,27 @@ type Interaction =
     };
 
 function isDrawableTool(tool: ToolType): tool is DrawableTool {
-  return tool === 'rectangle' || tool === 'ellipse';
+  return tool === 'rectangle' || tool === 'ellipse' || tool === 'arrow';
 }
 
-/** Builds a rectangle/ellipse spanning the drag from `start` to `current` (works for any drag direction). */
+/**
+ * Builds the shape for a drag from `start` to `current`. Rectangles and ellipses span the dragged box
+ * (normalised, so any drag direction works). An arrow is different: it keeps `start` as its tail and
+ * stores the head as an offset from it (`endX/endY` may be negative), so the direction of the drag
+ * is the direction of the arrow and no normalising is done.
+ */
 function shapeFromDrag(id: string, drag: Extract<Interaction, { kind: 'draw' }>): Shape {
+  if (drag.tool === 'arrow') {
+    return {
+      id,
+      type: 'arrow',
+      x: drag.start.x,
+      y: drag.start.y,
+      endX: drag.current.x - drag.start.x,
+      endY: drag.current.y - drag.start.y,
+      color: SHAPE_COLOR,
+    };
+  }
   const { x, y, w, h } = boundsFromDrag(drag.start, drag.current);
   return { id, type: drag.tool, x, y, w, h, color: SHAPE_COLOR };
 }
@@ -164,7 +182,9 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
         // empty space. If a shape was hit, also arm a move: nothing changes until the pointer leaves
         // the dead zone, so a plain click only selects.
         const startWorld = toWorldPoint(event);
-        const hitId = hitTest(boardStore.getModel(), startWorld);
+        // Thin shapes (arrows) get a click tolerance that is constant on screen: pixels → world units.
+        const tolerance = HIT_TOLERANCE_PX / useCameraStore.getState().camera.zoom;
+        const hitId = hitTest(boardStore.getModel(), startWorld, tolerance);
         useSelectionStore.getState().select(hitId);
         const original = hitId === null ? undefined : boardStore.get(hitId);
         if (!original) return;

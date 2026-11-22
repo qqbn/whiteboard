@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { hitTest } from './hit-test';
+import { ARROW_LINE_WIDTH } from './draw-shape';
+import { distanceToSegment, hitTest } from './hit-test';
 import type { BoardModel, Shape } from './model';
 
 function modelOf(...shapes: Shape[]): BoardModel {
@@ -73,7 +74,7 @@ describe('hitTest', () => {
     });
   });
 
-  it('never matches arrows or writing yet', () => {
+  describe('arrow', () => {
     const arrow: Shape = {
       id: 'arrow',
       type: 'arrow',
@@ -83,6 +84,37 @@ describe('hitTest', () => {
       endY: 0,
       color: '#000',
     };
+    const model = modelOf(arrow);
+
+    it('hits on the shaft and within the drawn half line width', () => {
+      expect(hitTest(model, { x: 50, y: 0 })).toBe('arrow');
+      expect(hitTest(model, { x: 50, y: ARROW_LINE_WIDTH / 2 })).toBe('arrow');
+    });
+
+    it('misses a point beside the shaft when there is no tolerance', () => {
+      expect(hitTest(model, { x: 50, y: 5 })).toBeNull();
+    });
+
+    it('hits beside the shaft when the tolerance is large enough', () => {
+      expect(hitTest(model, { x: 50, y: 5 }, 6)).toBe('arrow');
+      expect(hitTest(model, { x: 50, y: 7 }, 6)).toBeNull();
+    });
+
+    it('measures from the end points, not the infinite line, beyond the ends', () => {
+      // On the line's extension but 10 units past the tip: far from the segment.
+      expect(hitTest(model, { x: 110, y: 0 })).toBeNull();
+      expect(hitTest(model, { x: 110, y: 0 }, 10)).toBe('arrow');
+      expect(hitTest(model, { x: -10, y: 0 })).toBeNull();
+    });
+
+    it('handles arrows that point up-left (negative end offsets)', () => {
+      const back: Shape = { ...arrow, id: 'back', x: 100, y: 100, endX: -100, endY: -100 };
+      expect(hitTest(modelOf(back), { x: 50, y: 50 })).toBe('back');
+      expect(hitTest(modelOf(back), { x: 50, y: 70 })).toBeNull();
+    });
+  });
+
+  it('never matches writing yet', () => {
     const writing: Shape = {
       id: 'text',
       type: 'writing',
@@ -94,6 +126,33 @@ describe('hitTest', () => {
       fontSize: 16,
       color: '#000',
     };
-    expect(hitTest(modelOf(arrow, writing), { x: 50, y: 0 })).toBeNull();
+    expect(hitTest(modelOf(writing), { x: 50, y: 10 })).toBeNull();
+  });
+});
+
+describe('distanceToSegment', () => {
+  const a = { x: 0, y: 0 };
+  const b = { x: 10, y: 0 };
+
+  it('measures perpendicular distance when the projection falls on the segment', () => {
+    expect(distanceToSegment({ x: 4, y: 3 }, a, b)).toBe(3);
+  });
+
+  it('measures to the nearest end point when the projection falls outside', () => {
+    expect(distanceToSegment({ x: 13, y: 4 }, a, b)).toBe(5);
+    expect(distanceToSegment({ x: -3, y: 4 }, a, b)).toBe(5);
+  });
+
+  it('is zero for a point on the segment', () => {
+    expect(distanceToSegment({ x: 7, y: 0 }, a, b)).toBe(0);
+  });
+
+  it('falls back to point distance for a zero-length segment', () => {
+    expect(distanceToSegment({ x: 3, y: 4 }, a, a)).toBe(5);
+  });
+
+  it('works for diagonal segments', () => {
+    // Segment (0,0) → (10,10); the point (0,10) is 10 / sqrt(2) away from it (perpendicular foot at (5,5)).
+    expect(distanceToSegment({ x: 0, y: 10 }, a, { x: 10, y: 10 })).toBeCloseTo(10 * Math.SQRT1_2);
   });
 });
