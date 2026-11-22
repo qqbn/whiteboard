@@ -5,6 +5,7 @@ import { hitTest } from '@/canvas/hit-test';
 import type { BoardModel, Shape } from '@/canvas/model';
 import { startRenderLoop, type RenderState } from '@/canvas/render-loop';
 import { boundsFromDrag, isTinyDrag } from '@/lib/drag-rect';
+import { translateShape } from '@/lib/move-shape';
 import { useCameraStore } from '@/stores/camera-store';
 import { useSelectionStore } from '@/stores/selection-store';
 import { useToolStore, type ToolType } from '@/stores/tool-store';
@@ -23,6 +24,8 @@ const DRAFT_ID = '__draft__';
 const SHAPE_COLOR = '#4f46e5';
 /** A drag smaller than this (in world units, both sides) is treated as a click and creates nothing. */
 const MIN_SHAPE_SIZE = 4;
+/** Pointer travel (canvas pixels) before a click on a shape turns into a move, so clicks don't nudge shapes. */
+const MOVE_DEAD_ZONE_PX = 3;
 /** Wheel sensitivity: zoom factor = exp(-deltaY * ZOOM_SENSITIVITY), so scrolling back undoes it exactly. */
 const ZOOM_SENSITIVITY = 0.0015;
 /** Firefox reports wheel deltas in lines instead of pixels; this converts lines to pixels. */
@@ -35,10 +38,23 @@ type DrawableTool = Extract<ToolType, 'rectangle' | 'ellipse'>;
  * changes on every pointermove and nothing in React needs to re-render for it.
  * - `pan`: dragging the camera; `last` is the previous pointer position in canvas pixels.
  * - `draw`: dragging out a new shape; `start`/`current` are in world coordinates.
+ * - `move`: dragging an existing shape. `original` is the shape as it was at pointerdown (the store
+ *   is not touched until release); `startScreen` is the pointer position in canvas pixels (for the
+ *   dead zone), `startWorld` in world coordinates (for the delta); `delta` is the TOTAL offset in
+ *   world units since pointerdown; `moved` flips to true once the pointer left the dead zone.
  */
 type Interaction =
   | { kind: 'pan'; pointerId: number; last: Point }
-  | { kind: 'draw'; pointerId: number; tool: DrawableTool; start: Point; current: Point };
+  | { kind: 'draw'; pointerId: number; tool: DrawableTool; start: Point; current: Point }
+  | {
+      kind: 'move';
+      pointerId: number;
+      original: Shape;
+      startScreen: Point;
+      startWorld: Point;
+      delta: Point;
+      moved: boolean;
+    };
 
 function isDrawableTool(tool: ToolType): tool is DrawableTool {
   return tool === 'rectangle' || tool === 'ellipse';
@@ -56,6 +72,11 @@ function withPreviewShape(model: BoardModel, shape: Shape): BoardModel {
     shapes: { ...model.shapes, [shape.id]: shape },
     order: [...model.order, shape.id],
   };
+}
+
+/** Returns a copy of the model where one existing shape is swapped for `shape` (draw order unchanged). */
+function withReplacedShape(model: BoardModel, shape: Shape): BoardModel {
+  return { shapes: { ...model.shapes, [shape.id]: shape }, order: model.order };
 }
 
 export function BoardCanvas({ boardId }: { boardId: string }) {
@@ -81,6 +102,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     // Picks the mouse cursor that matches what a click-drag would do right now.
     const updateCursor = () => {
       if (interaction?.kind === 'pan') canvas.style.cursor = 'grabbing';
+      else if (interaction?.kind === 'move') canvas.style.cursor = 'move';
       else if (spaceHeld) canvas.style.cursor = 'grab';
       else if (isDrawableTool(useToolStore.getState().activeTool))
         canvas.style.cursor = 'crosshair';
@@ -88,15 +110,24 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     };
 
     // What the render loop draws each frame: the committed model plus, while the user is
-    // dragging out a shape, a live preview of it. The preview is not in the store yet, so a
-    // cancelled drag leaves no trace (and a single `add` on release means one future undo step).
-    const getState = (): RenderState => {
+    // dragging out a shape or moving one, a live preview of it. The preview is not in the store, so
+    // a cancelled gesture leaves no trace (and a single `add`/`update` on release means one future
+    // undo step). The selection outline follows a moved shape because it is drawn from this model.
+    const getPreviewModel = (): BoardModel => {
       const model = boardStore.getModel();
+      if (interaction?.kind === 'draw') {
+        return withPreviewShape(model, shapeFromDrag(DRAFT_ID, interaction));
+      }
+      if (interaction?.kind === 'move' && interaction.moved) {
+        const { original, delta } = interaction;
+        return withReplacedShape(model, translateShape(original, delta.x, delta.y));
+      }
+      return model;
+    };
+
+    const getState = (): RenderState => {
       return {
-        model:
-          interaction?.kind === 'draw'
-            ? withPreviewShape(model, shapeFromDrag(DRAFT_ID, interaction))
-            : model,
+        model: getPreviewModel(),
         camera: useCameraStore.getState().camera,
         selectedId: useSelectionStore.getState().selectedId,
       };
@@ -114,7 +145,8 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
     };
 
     // Starts a pan (middle button, or left button while holding Space) or a shape drag (left button
-    // with the rectangle/ellipse tool), or selects a shape on click with the select tool.
+    // with the rectangle/ellipse tool), or, with the select tool, selects the shape under the cursor
+    // and arms a move gesture on it.
     const onPointerDown = (event: PointerEvent) => {
       if (interaction) return; // one gesture at a time (e.g. ignore a second finger/button)
 
@@ -128,10 +160,23 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
         const start = toWorldPoint(event);
         interaction = { kind: 'draw', pointerId: event.pointerId, tool, start, current: start };
       } else if (event.button === 0 && tool === 'select') {
-        // A plain click with the select tool: select the topmost shape under the cursor, or clear
-        // the selection when the click lands on empty space. No drag gesture starts here yet.
-        useSelectionStore.getState().select(hitTest(boardStore.getModel(), toWorldPoint(event)));
-        return;
+        // Select the topmost shape under the cursor, or clear the selection when the click lands on
+        // empty space. If a shape was hit, also arm a move: nothing changes until the pointer leaves
+        // the dead zone, so a plain click only selects.
+        const startWorld = toWorldPoint(event);
+        const hitId = hitTest(boardStore.getModel(), startWorld);
+        useSelectionStore.getState().select(hitId);
+        const original = hitId === null ? undefined : boardStore.get(hitId);
+        if (!original) return;
+        interaction = {
+          kind: 'move',
+          pointerId: event.pointerId,
+          original,
+          startScreen: toCanvasPoint(event),
+          startWorld,
+          delta: { x: 0, y: 0 },
+          moved: false,
+        };
       } else {
         return;
       }
@@ -151,13 +196,31 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
           .getState()
           .panByScreen(point.x - interaction.last.x, point.y - interaction.last.y);
         interaction.last = point;
+      } else if (interaction.kind === 'move') {
+        // The dead zone is measured on screen (so it feels the same at any zoom), the delta in the
+        // world. The delta is always TOTAL since pointerdown, never accumulated per event.
+        if (!interaction.moved) {
+          const point = toCanvasPoint(event);
+          const travelled = Math.hypot(
+            point.x - interaction.startScreen.x,
+            point.y - interaction.startScreen.y,
+          );
+          if (travelled < MOVE_DEAD_ZONE_PX) return;
+          interaction.moved = true;
+        }
+        const world = toWorldPoint(event);
+        interaction.delta = {
+          x: world.x - interaction.startWorld.x,
+          y: world.y - interaction.startWorld.y,
+        };
       } else {
         // Converted with the *current* camera, so zooming with the wheel mid-drag stays consistent.
         interaction.current = toWorldPoint(event);
       }
     };
 
-    // Ends the gesture. A finished shape drag is committed to the store as one `add`.
+    // Ends the gesture. A finished shape drag is committed to the store as one `add`, a finished
+    // move as one `update` of the final position (skipped when the shape never left the dead zone).
     const onPointerUp = (event: PointerEvent) => {
       if (!interaction || event.pointerId !== interaction.pointerId) return;
 
@@ -166,6 +229,10 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
         const shape = shapeFromDrag(crypto.randomUUID(), interaction);
         const size = boundsFromDrag(interaction.start, interaction.current);
         if (!isTinyDrag(size, MIN_SHAPE_SIZE)) boardStore.add(shape);
+      } else if (interaction.kind === 'move' && interaction.moved) {
+        const { original, delta } = interaction;
+        const moved = translateShape(original, delta.x, delta.y);
+        boardStore.update(original.id, { x: moved.x, y: moved.y });
       }
 
       interaction = null;
@@ -189,7 +256,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
         spaceHeld = true;
         updateCursor();
       } else if (event.key === 'Escape') {
-        if (interaction?.kind === 'draw') cancelInteraction();
+        if (interaction?.kind === 'draw' || interaction?.kind === 'move') cancelInteraction();
         else useSelectionStore.getState().select(null);
       }
     };
