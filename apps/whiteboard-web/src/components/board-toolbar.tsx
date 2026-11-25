@@ -1,6 +1,6 @@
 'use client';
 
-import { Toolbar, ToolbarToggleGroup, ToolbarToggleItem } from '@whiteboard/ui';
+import { Toolbar, ToolbarSeparator, ToolbarToggleGroup, ToolbarToggleItem } from '@whiteboard/ui';
 import {
   Circle,
   MousePointer2,
@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect } from 'react';
+import { isShapeColor, SHAPE_COLORS, useStyleStore } from '@/stores/style-store';
 import { isToolType, useToolStore, type ToolType } from '@/stores/tool-store';
 
 const TOOL_CONFIG: Record<
@@ -37,6 +38,8 @@ function isTypingTarget(target: EventTarget | null) {
 export function BoardToolbar() {
   const activeTool = useToolStore((s) => s.activeTool);
   const setTool = useToolStore((s) => s.setTool);
+  const color = useStyleStore((s) => s.color);
+  const setColor = useStyleStore((s) => s.setColor);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -68,6 +71,25 @@ export function BoardToolbar() {
             title={`${label} (${shortcut.toUpperCase()})`}
           >
             <Icon size={18} aria-hidden />
+          </ToolbarToggleItem>
+        ))}
+      </ToolbarToggleGroup>
+      <ToolbarSeparator />
+      <ToolbarToggleGroup
+        type="single"
+        value={color}
+        // Same as the tools: clicking the active colour again emits '' and must not clear it.
+        onValueChange={(value) => isShapeColor(value) && setColor(value)}
+        aria-label="Color"
+        className="flex gap-1"
+      >
+        {SHAPE_COLORS.map(({ label, value }) => (
+          <ToolbarToggleItem key={value} value={value} aria-label={label} title={label}>
+            <span
+              aria-hidden
+              className="block size-5 rounded-full border border-black/10"
+              style={{ backgroundColor: value }}
+            />
           </ToolbarToggleItem>
         ))}
       </ToolbarToggleGroup>

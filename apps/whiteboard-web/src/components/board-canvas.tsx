@@ -10,6 +10,7 @@ import { boundsFromDrag, isTinyDrag } from '@/lib/drag-rect';
 import { translateShape } from '@/lib/move-shape';
 import { useCameraStore } from '@/stores/camera-store';
 import { useSelectionStore } from '@/stores/selection-store';
+import { useStyleStore } from '@/stores/style-store';
 import { useTextEditStore } from '@/stores/text-edit-store';
 import { useToolStore, type ToolType } from '@/stores/tool-store';
 import { useEffect, useRef } from 'react';
@@ -24,7 +25,6 @@ const boardStore = createBoardStore();
 
 /** Id of the shape being dragged out. It only exists in the preview model, never in the store. */
 const DRAFT_ID = '__draft__';
-const SHAPE_COLOR = '#4f46e5';
 /** A drag smaller than this (in world units, both sides) is treated as a click and creates nothing. */
 const MIN_SHAPE_SIZE = 4;
 /** How close (in screen pixels) a click must be to a thin shape such as an arrow to select it. */
@@ -42,7 +42,8 @@ type DrawableTool = Extract<ToolType, 'rectangle' | 'ellipse' | 'arrow'>;
  * What the pointer is currently doing. Lives in a closure variable (not React state) because it
  * changes on every pointermove and nothing in React needs to re-render for it.
  * - `pan`: dragging the camera; `last` is the previous pointer position in canvas pixels.
- * - `draw`: dragging out a new shape; `start`/`current` are in world coordinates.
+ * - `draw`: dragging out a new shape; `start`/`current` are in world coordinates. `color` is read from the
+ *   style store once at pointerdown, so the preview and the committed shape always share one colour.
  * - `move`: dragging an existing shape. `original` is the shape as it was at pointerdown (the store
  *   is not touched until release); `startScreen` is the pointer position in canvas pixels (for the
  *   dead zone), `startWorld` in world coordinates (for the delta); `delta` is the TOTAL offset in
@@ -50,7 +51,14 @@ type DrawableTool = Extract<ToolType, 'rectangle' | 'ellipse' | 'arrow'>;
  */
 type Interaction =
   | { kind: 'pan'; pointerId: number; last: Point }
-  | { kind: 'draw'; pointerId: number; tool: DrawableTool; start: Point; current: Point }
+  | {
+      kind: 'draw';
+      pointerId: number;
+      tool: DrawableTool;
+      color: string;
+      start: Point;
+      current: Point;
+    }
   | {
       kind: 'move';
       pointerId: number;
@@ -80,11 +88,11 @@ function shapeFromDrag(id: string, drag: Extract<Interaction, { kind: 'draw' }>)
       y: drag.start.y,
       endX: drag.current.x - drag.start.x,
       endY: drag.current.y - drag.start.y,
-      color: SHAPE_COLOR,
+      color: drag.color,
     };
   }
   const { x, y, w, h } = boundsFromDrag(drag.start, drag.current);
-  return { id, type: drag.tool, x, y, w, h, color: SHAPE_COLOR };
+  return { id, type: drag.tool, x, y, w, h, color: drag.color };
 }
 
 /** Returns a copy of the model with `shape` appended on top, without touching the store. */
@@ -206,7 +214,15 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
         interaction = { kind: 'pan', pointerId: event.pointerId, last: toCanvasPoint(event) };
       } else if (event.button === 0 && isDrawableTool(tool)) {
         const start = toWorldPoint(event);
-        interaction = { kind: 'draw', pointerId: event.pointerId, tool, start, current: start };
+        const { color } = useStyleStore.getState();
+        interaction = {
+          kind: 'draw',
+          pointerId: event.pointerId,
+          tool,
+          color,
+          start,
+          current: start,
+        };
       } else if (event.button === 0 && tool === 'select') {
         // Select the topmost shape under the cursor, or clear the selection when the click lands on
         // empty space. If a shape was hit, also arm a move: nothing changes until the pointer leaves
@@ -316,7 +332,7 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
         y: point.y - lineHeightOf(DEFAULT_FONT_SIZE) / 2,
         content: '',
         fontSize: DEFAULT_FONT_SIZE,
-        color: SHAPE_COLOR,
+        color: useStyleStore.getState().color,
       });
     };
 

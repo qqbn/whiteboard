@@ -46,3 +46,31 @@ test('Delete removes the selected shape', async ({ page }) => {
   await page.keyboard.press('Delete');
   await expect.poll(() => alphaAt(350, 340)).toBe(0);
 });
+
+test('new shapes use the colour picked in the toolbar', async ({ page }) => {
+  await page.goto('/board/test');
+  const canvas = page.getByLabel('Whiteboard canvas');
+  await expect(canvas).toBeVisible();
+
+  // Reads the RGB of one backing-store pixel at a CSS-pixel position (× DPR 2).
+  const rgbAt = (x: number, y: number) =>
+    canvas.evaluate(
+      (el: HTMLCanvasElement, [px, py]) => {
+        const data = el.getContext('2d')?.getImageData(px * 2, py * 2, 1, 1).data;
+        return data ? [data[0], data[1], data[2]] : [];
+      },
+      [x, y] as const,
+    );
+
+  await page.getByRole('radio', { name: 'Red' }).click();
+  await expect(page.getByRole('radio', { name: 'Red' })).toHaveAttribute('aria-checked', 'true');
+
+  await page.getByRole('radio', { name: 'Rectangle' }).click();
+  await page.mouse.move(300, 300);
+  await page.mouse.down();
+  await page.mouse.move(400, 380, { steps: 5 });
+  await page.mouse.up();
+
+  // #dc2626 = rgb(220, 38, 38)
+  await expect.poll(() => rgbAt(350, 340)).toEqual([220, 38, 38]);
+});
