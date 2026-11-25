@@ -334,7 +334,8 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
       updateCursor();
     };
 
-    // Space turns the left button into a pan handle; Escape cancels a shape drag in progress (or clears the selection when idle).
+    // Space turns the left button into a pan handle; Escape cancels a shape drag in progress (or clears the selection when idle);
+    // Delete/Backspace removes the selected shape. Keys typed into a text field (e.g. the text editor) are ignored.
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable]'))
@@ -347,7 +348,20 @@ export function BoardCanvas({ boardId }: { boardId: string }) {
       } else if (event.key === 'Escape') {
         if (interaction?.kind === 'draw' || interaction?.kind === 'move') cancelInteraction();
         else useSelectionStore.getState().select(null);
+      } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        deleteSelectedShape();
       }
+    };
+
+    // Delete/Backspace removes the selected shape. A move in progress is cancelled first: its pointerup
+    // would only `update` an id that no longer exists (a no-op), but the preview would keep drawing the
+    // dragged copy until then. The selection is cleared so it does not point at a removed shape.
+    const deleteSelectedShape = () => {
+      const { selectedId, select } = useSelectionStore.getState();
+      if (selectedId === null) return;
+      if (interaction?.kind === 'move') cancelInteraction();
+      boardStore.remove(selectedId);
+      select(null);
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code !== 'Space') return;
